@@ -76,3 +76,6 @@ DerivedDataCache/*
 
 # RKS additions
 Release/*
+viewport.data
+.codelite
+.kdev4

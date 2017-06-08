@@ -2,9 +2,9 @@
 
 Unreal Engine car simulator for training our self driving car. Includes a scene capture class.
 
-This requires UnrealEnginePython.  
+This project requires UnrealEnginePython. There  should be to add this dependency to the build
+system, but for now just run the following commands ONCE.
 ```
->mkdir Plugins
 >cd Plugins
 >git clone https://github.com/20tab/UnrealEnginePython.git
 ```

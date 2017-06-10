@@ -79,3 +79,5 @@ Release/*
 viewport.data
 .codelite
 .kdev4
+Plugins/*
+__pycache__

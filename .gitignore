@@ -81,3 +81,4 @@ viewport.data
 .kdev4
 Plugins/*
 __pycache__
+*.swp

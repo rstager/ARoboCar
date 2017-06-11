@@ -1,12 +1,15 @@
 import unreal_engine as ue
 import pickle
 import numpy as np
+import math
+from unreal_engine import FVector
+
+
 
 class Driver:
     
     def begin_play(self):
         ue.log('Driver Begin Play')
-
         # get a reference to the owing pawn (a character)
         self.pawn = self.uobject.get_owner()
         ue.log(self.pawn.get_name())
@@ -14,6 +17,11 @@ class Driver:
         # need to see if this is legal to cache the texture
         self.texture=self.uobject.get_owner().get_actor_component_by_type(ue.find_class('ATextureReader'))
         self.texture.SetWidthHeight(160,90)
+        self.rabbit=self.uobject.get_world().find_actor_by_label('rabbit')
+        print("rabbit={}".format(self.rabbit))
+        loc=self.uobject.get_actor_location()
+        print(loc)
+        print(dir(FVector))
 
     def tick(self,delta_time):
         valid, pixels,framelag =self.texture.GetBuffer()
@@ -32,6 +40,14 @@ class Driver:
             #
             vmove=self.pawn.VehicleMovement
             vmove.BrakeInput= 0
-            #ue.log("Brake={} ".format(vmove.BrakeInput))
-            vmove.SteeringInput=0.0
-            vmove.ThrottleInput=0.7
+            if (self.rabbit):
+                rvector=self.rabbit.get_actor_location()-self.pawn.get_actor_location()
+                forward=self.pawn.get_actor_forward()
+                distance=rvector.length()
+                angle=FVector.cross(rvector,forward).z/distance
+                vmove.SteeringInput= -angle
+                vmove.ThrottleInput=(distance-300)/1000
+                ue.log("vmove {} {}".format(vmove.SteeringInput,vmove.ThrottleInput))
+            else:
+                vmove.SteeringInput=0.0
+                #vmove.ThrottleInput=0.7

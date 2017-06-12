@@ -6,6 +6,6 @@ public class ARoboCar : ModuleRules
 {
 	public ARoboCar(TargetInfo Target)
 	{
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "PhysXVehicles", "HeadMountedDisplay","Networking" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "PhysXVehicles", "HeadMountedDisplay","Networking","RenderCore","RHI" });
 	}
 }

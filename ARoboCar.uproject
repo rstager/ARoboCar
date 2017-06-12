@@ -51,5 +51,10 @@
 			"Name": "SubversionSourceControl",
 			"Enabled": false
 		}
+	],
+	"TargetPlatforms": [
+		"WindowsNoEditor",
+		"LinuxNoEditor",
+		"MacNoEditor"
 	]
 }

@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 import math
 from unreal_engine import FVector
-from unreal_engine.classes import SplineComponent
+from unreal_engine.classes import SplineComponent,TextureRenderTarget2D
 
 
 
@@ -49,28 +49,35 @@ class SplinePath:
         d1=self.component.GetDistanceAlongSplineAtSplinePoint(int(key))
         d2=self.component.GetDistanceAlongSplineAtSplinePoint(int(key)+1)
         distance=(d2-d1)*(key%1.0)+d1
-        print("closest keys {} d={} {}, distance={}".format(key,d1,d2,distance))
+        #print("closest keys {} d={} {}, distance={}".format(key,d1,d2,distance))
         offset=(rvector-location).length
         return distance,offset
 
 class Vcam:
-    def __init__(self,actor,sz,offset,dir):
+    def __init__(self,actor,label,sz,offset,dir):
+        print(actor)
         self.width=sz[0]
         self.height=sz[1]
-        self.texture=actor.get_actor_component_by_type(ue.find_class('ATextureReader'))
-        self.texture.SetWidthHeight(sz[0],sz[1])
+        # we need three parts, SceneCaptureActor, ATextureReader, RenderTargetTexture
+        self.rendertarget=TextureRenderTarget2D()
+        self.reader = actor.add_actor_component(ue.find_class('ATextureReader'),label+"_rendertarget")
+        self.reader.set_property('RenderTarget',self.rendertarget)
+        self.scene_capture= actor.add_actor_component(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
+        self.scene_capture.set_property("TextureTarget",self.rendertarget)
+        self.reader.SetWidthHeight(sz[0],sz[1])
     def capture(self):
-        return self.texture.GetBuffer() # valid, pixels,framelag
+        return self.reader.GetBuffer() # valid, pixels,framelag
 
 class Driver:
     def begin_play(self):
         self.pawn = self.uobject.get_owner()
         ue.log("Driver Begin Play {}".format(self.pawn.get_name()))
         self.pawn.EnableIncarView(True)
-        self.vcam=Vcam(self.pawn,[160,90],[0,0],[0,0])
+        self.vcam=Vcam(self.pawn,"frontcamera",[160,90],[0,0],[0,0])
         self.path=SplinePath(self.pawn,'Racetrack1')
 
     def tick(self,delta_time):
+        if (self.vcam == None): return
         valid, pixels,framelag =self.vcam.capture()
         if(valid):
             location = self.pawn.get_actor_location()

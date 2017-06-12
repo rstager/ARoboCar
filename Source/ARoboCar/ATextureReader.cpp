@@ -20,7 +20,8 @@ UATextureReader::UATextureReader()
 void UATextureReader::BeginPlay()
 {
 	Super::BeginPlay();
-    print("Texture Reader begin play");
+    print("Texture Reader begin play Here");
+    if(RenderTarget==NULL)return;
     FTextureRenderTarget2DResource* RenderResource = (FTextureRenderTarget2DResource*)RenderTarget->Resource;
     this->height=RenderResource->GetSizeXY().Y;
     //RenderTarget->SizeX=w;
@@ -63,6 +64,7 @@ bool UATextureReader::GetBuffer(TArray<FColor> &buf, int &frame)
 
 void UATextureReader::StartReadPixels()
 {
+    if(RenderTarget==NULL)return;
 	//borrowed from RenderTarget::ReadPixels()
 	FTextureRenderTarget2DResource* RenderResource = (FTextureRenderTarget2DResource*)RenderTarget->Resource;
  

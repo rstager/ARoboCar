@@ -50,6 +50,10 @@
 		{
 			"Name": "SubversionSourceControl",
 			"Enabled": false
+		},
+		{
+			"Name": "PluginBrowser",
+			"Enabled": true
 		}
 	],
 	"TargetPlatforms": [

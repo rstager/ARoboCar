@@ -8,11 +8,11 @@ input = h5py.File("../../robocar.hdf5", 'r')
 imagesin=input['frontcamera']
 anglesin=input['steering.throttle']
 
-print(imagesin.shape)
-print(anglesin.shape)
+fig, ax = plt.subplots()
 
-plt.ion()
+im = ax.imshow(imagesin[0])
+fig.show()
 for idx in range(imagesin.shape[0]):
     print(idx,anglesin[idx],imagesin[idx].shape)
-    plt.imshow(imagesin[idx]*255)
-    plt.pause(0.0001)
+    im.set_data(imagesin[idx]*255)
+    fig.canvas.draw()

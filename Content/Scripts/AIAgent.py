@@ -4,10 +4,11 @@ import math
 from unreal_engine import FVector,FTransform,FRotator
 from unreal_engine.classes import TextureRenderTarget2D,SceneComponent,SceneCaptureComponent2D
 from unreal_engine.classes import Actor,SplineComponent,SkeletalMeshComponent
-#import os
-#os.environ["HDF5_DISABLE_VERSION_CHECK"]="1"
-#import h5py
+import subprocess
 import pickle
+
+
+
 
 class SplinePath:
     def __init__(self,actor,label):
@@ -107,8 +108,6 @@ class Vcam:
         for c in actor.get_actor_components():
             if(c.is_a(ue.find_class('SceneCaptureComponent2D'))):
                 ue.log("{} {} {} {} {}".format(c.get_name(),c.get_relative_location(),c.get_property('AttachParent'),c.get_property('bAbsoluteLocation'),c.get_property('Mobility')))
-                properties_list = c.properties()
-                #print(properties_list)
 
         # add reader last
         self.reader = actor.add_actor_component(ue.find_class('ATextureReader'),label+"_rendertarget")
@@ -133,16 +132,21 @@ class Driver:
 
         self.pawn.EnableIncarView(True)
 
-        #setup h5
-        self.batchsz=0
+        #setup recording
+        self.batchsz=100
         if self.batchsz != 0:
-            self.maxidx = self.batchsz
-            self.output = h5py.File("robocar.hdf5", 'w')
-            self.images = self.output.create_dataset('frontcamera', (self.maxidx, self.width, self.height, 4), 'i1', maxshape=(None, self.width, self.height, 4))
-            self.images.attrs['description'] = "simple test"
-            self.controls = self.output.create_dataset('steering.throttle', (self.maxidx, 2), maxshape=(None, 2))
-            self.h5idx=0
-            self.output.flush()
+            self.batch=0
+            self.images = np.zeros ([self.batchsz, self.height, self.width, 3])
+            self.controls =np.zeros ([self.batchsz, 2])
+            ue.log("images={},controls={}".format(self.images.shape,self.controls.shape))
+            self.outputidx=0
+            self.batchidx=0
+            self.maxidx=self.batchsz
+            ue.log("search path ".format(sys.path))
+            self.h5process=subprocess.Popen(["python", "Content/Scripts/2h5.py"], stdin=subprocess.PIPE,stderr=subprocess.STDOUT)
+            self.output = self.h5process.stdin
+            pickle.dump((self.batchsz, self.width, self.height), self.output)
+
 
     def tick(self,delta_time):
         if not hasattr(self, 'vcam'):
@@ -171,14 +175,20 @@ class Driver:
             else:
                 vmove.SteeringInput=0.0
                 #vmove.ThrottleInput=0.7
-            pickle.dump(img, open("viewport.data", "wb"))
-            #record in H5
+
+            #record
             if self.batchsz != 0 :
-                self.images[self.h5idx]=img
-                self.control[self.h5idx]=[vmove.SteeringInput,vmove.ThrottleInput]
-                self.h5idx+=1
-                if (self.h5idx > self.maxidx):
+
+                self.images[self.batchidx]=img
+                self.controls[self.batchidx]=[vmove.SteeringInput,vmove.ThrottleInput]
+                self.batchidx+=1
+                self.outputidx+=1
+                if (self.batchidx >= self.batchsz):
+                    ue.log("Output to 2h5.py {} {}".format(self.maxidx,np.sum(self.images)))
+                    pickle.dump(self.images, self.output )
+                    pickle.dump(self.controls, self.output )
                     self.maxidx += self.batchsz
-                    self.images.resize((self.maxidx,self.height,self.width,4))
-                    self.controls.resize((self.maxidx,2))
+                    self.batchidx=0
+                    self.images = np.zeros((self.batchsz, self.height, self.width, 3), np.uint8)
+                    self.controls = np.zeros((self.batchsz, 2))
                     self.output.flush()

@@ -6,9 +6,12 @@ from unreal_engine.classes import TextureRenderTarget2D,SceneComponent,SceneCapt
 from unreal_engine.classes import Actor,SplineComponent,SkeletalMeshComponent
 import subprocess
 import pickle
+import sys
+import random
 
-
-
+add_steering_noise=.1
+noise_probability=0.03  #how often to deviate - set to zero to drive correctly
+deviation_duration=50 # duration of deviation
 
 class SplinePath:
     def __init__(self,actor,label):
@@ -52,7 +55,7 @@ class SplinePath:
         d2=self.component.GetDistanceAlongSplineAtSplinePoint(int(key)+1)
         distance=(d2-d1)*(key%1.0)+d1
         #print("closest keys {} d={} {}, distance={}".format(key,d1,d2,distance))
-        offset=(rvector-location).length
+        offset=(rvector-location).length()
         return distance,offset
 
 class Vcam:
@@ -132,6 +135,10 @@ class Driver:
 
         self.pawn.EnableIncarView(True)
 
+        self.history=[]
+
+        self.deviating_cnt=0
+
         #setup recording
         self.batchsz=100
         if self.batchsz != 0:
@@ -151,16 +158,14 @@ class Driver:
     def tick(self,delta_time):
         if not hasattr(self, 'vcam'):
             return
+        if(len(self.history)>4): self.history.pop(0)
+        location = self.pawn.get_actor_location() #current values
+        rotation = self.pawn.get_actor_rotation()
+        self.history.append((location,rotation))
         valid, pixels,framelag =self.vcam.capture()
-        if(valid):
-            location = self.pawn.get_actor_location()
-            rotation = self.pawn.get_actor_rotation()
-            camloc=self.vcam.scene_capture.get_world_location()
-            if True:
-                properties_list = self.pawn.properties()
-                name = self.pawn.get_name()
-                ue.log("{} at [{} {} {}] [{}x{}] {} {} vcam {} {} {}".format(name,location[0],location[1],location[2],
-                                                               self.vcam.width,self.vcam.height,len(pixels),framelag,camloc[0],camloc[1],camloc[2]))
+        if(valid and framelag <=len(self.history)):
+            location,rotation=self.history[-(framelag+1)] #values at time of snapshot
+
             img=np.array(pixels).reshape((self.vcam.height,self.vcam.width,4)).astype(np.uint8)[:,:,0:3]
             #
             # Control side
@@ -168,14 +173,33 @@ class Driver:
             vmove=self.pawn.VehicleMovement
             vmove.BrakeInput= 0
             if (self.path):
-                distance, angle=self.path.direction_ahead(self.pawn,200)
-                vmove.SteeringInput= -angle
-                vmove.ThrottleInput=0.7
-                ue.log("vmove {} {}".format(vmove.SteeringInput,vmove.ThrottleInput))
+                distance, angle = self.path.direction_ahead(self.pawn, 400)
+                reward,offset=self.path.closest(location)
+                if self.deviating_cnt > 0 and abs(offset)>100: #stop deviating if we ran off the road
+                    self.deviating_cnt=0
+                    ue.log("Abort deviation")
+                if self.deviating_cnt == 0:
+                    vmove.SteeringInput= -angle
+                    vmove.ThrottleInput=0.7
+                else:
+                    # we record the correct direction, but we steer with added noise for a while
+                    vmove.SteeringInput= -self.deviation_angle
+                    vmove.ThrottleInput=0.7
+                    self.deviating_cnt -= 1
+                    if(self.deviating_cnt==0):
+                        ue.log("End deviation")
+                if add_steering_noise >0 and self.deviating_cnt == 0 and random.random()<noise_probability:
+                    self.deviating_cnt = deviation_duration
+                    self.deviation_angle = angle + random.random()*add_steering_noise-(add_steering_noise/2)
+                    ue.log("****************  Begin Steering deviation {}".format(self.deviation_angle))
             else:
                 vmove.SteeringInput=0.0
                 #vmove.ThrottleInput=0.7
-
+            if False:
+                properties_list = self.pawn.properties()
+                name = self.pawn.get_name()
+                ue.log("{} at [{:8.1f} {:8.1f} {:8.1f}] [{:4}x{:4}] {:5} {:1} vmove {:5.4f} {:3.2f} reward={:10.1f} offset={:5.4f}".format(name,location[0],location[1],location[2],
+                                                               self.vcam.width,self.vcam.height,len(pixels),framelag,vmove.SteeringInput, vmove.ThrottleInput, reward, offset))
             #record
             if self.batchsz != 0 :
 

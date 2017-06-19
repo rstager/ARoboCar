@@ -11,4 +11,4 @@ system, but for now just run the following commands ONCE.
 
 When the editor is first launched it will ask if the library should be rebuilt. Confirm 'yes' and it will build the editor.
 
-The project will run the AIAgent.py from the directory where the game/editor was started.
+The project will run the AIAgent.py from the Content/Scripts directory.

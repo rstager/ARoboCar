@@ -14,6 +14,7 @@ noise_probability=0.01  #how often to deviate - set to zero to drive correctly
 deviation_duration=20   # duration of deviation
 
 # first connect to the simulator
+print("Connecting to server")
 fstate=open("../../roboserver.state","rb")
 fcmd=open("../../roboserver.cmd","wb")
 print("Connection opened")
@@ -44,7 +45,6 @@ h5idx=0
 while True:
     # get images and state from simulator
     # record images and steering,throttle
-    images[h5idx] = pickle.load(fstate)
     state=pickle.load(fstate)
     controls[h5idx]= [state["PIDsteering"],state["PIDthrottle"]]
     h5idx += 1

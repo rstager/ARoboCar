@@ -12,15 +12,6 @@ from fcntl import fcntl, F_GETFL, F_SETFL
 from os import O_NONBLOCK, read
 
 
-print (sys.path)
-
-add_steering_noise=.05
-noise_probability=0.01  #how often to deviate - set to zero to drive correctly
-deviation_duration=50 # duration of deviation
-BATCHSZ=100 # set to zero to disable recording
-#
-
-
 class SplinePath:
     def __init__(self,actor,label):
         landscape=actor.get_world().find_actor_by_label(label)
@@ -127,9 +118,6 @@ class Vcam:
         return self.reader.GetBuffer() # valid, pixels,framelag
 
 class Driver:
-    def __init__(self):
-
-        pass
     def open_connection(self):
         if hasattr(self,"fstate"):
             ue.log("Closing controller connection")
@@ -138,8 +126,12 @@ class Driver:
         ue.log("WAITING FOR controller to connect")
         self.fstate = open("roboserver.state", "wb")
         self.fcmd = open("roboserver.cmd", "rb")
-        print("Fifos opened")
-        pickle.dump(( self.width, self.height), self.fstate)
+        print("Fifos opened sending config")
+        pickle.dump({"camerawidth":self.width,"cameraheight":self.height}, self.fstate)
+        self.fstate.flush()
+        self.requested_config = pickle.load(self.fcmd)
+        print("Requested config",self.requested_config)
+
 
     def begin_play(self):
         self.pawn = self.uobject.get_owner()
@@ -173,9 +165,8 @@ class Driver:
             #
             vmove=self.pawn.VehicleMovement
             vmove.BrakeInput= 0
-            distance, angle = self.path.direction_ahead(self.pawn, 400)
-            reward,offset=self.path.closest(location)
-
+            dummy, angle = self.path.direction_ahead(self.pawn, 400)
+            pathdistance,offset=self.path.closest(location)
 
             try:
                 # we send the data first, but we let the controller process in parrallel, so the command is actually
@@ -192,10 +183,10 @@ class Driver:
 
                 #send the state and give the controller some time to process
                 pickle.dump(img, self.fstate)
-                pickle.dump({"reward":reward,"offset":offset,"PIDthrottle":0.7,"PIDsteering":-angle,"delta_time":delta_time}, self.fstate)
+                pickle.dump({"pathdistance":pathdistance,"offset":offset,"PIDthrottle":0.7,"PIDsteering":-angle,"delta_time":delta_time}, self.fstate)
                 self.fstate.flush()
 
-            except (OSError,ValueError,EOFError):
+            except (OSError,ValueError,EOFError,BrokenPipeError):
                 print("Lost connection to controller")
                 self.fstate.close()
                 self.fcmd.close()

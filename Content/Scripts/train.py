@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 
-filename="../../robocar.hdf5"
+filename="robocar.hdf5"
 input = h5py.File(filename, 'r')
 imagesin=input['frontcamera']
 controlsin=input['steering.throttle']

@@ -3,6 +3,7 @@ import pickle
 import numpy as np
 import sys
 import random
+import simulator
 
 # This controller just follows the PID recommendations most of the time but deviates to capture off-policy state
 # this controller also records state
@@ -13,21 +14,8 @@ steering_noise=.15      #amount of noise to add to steering
 noise_probability=0.01  #how often to deviate - set to zero to drive correctly
 deviation_duration=20   # duration of deviation
 
-# first connect to the simulator
-print("Connecting to server")
-fstate=open("../../roboserver.state","rb")
-fcmd=open("../../roboserver.cmd","wb")
-print("Connection opened")
-
-# get the configuration data
-config = pickle.load(fstate)
-print("config=",config)
-height=config["cameraheight"]
-width=config["camerawidth"]
-
-#sending back config data with possible changes
-pickle.dump(config,fcmd)
-fcmd.flush()
+sim=simulator.Simulator()
+sim.connect()
 
 
 
@@ -45,7 +33,7 @@ h5idx=0
 while True:
     # get images and state from simulator
     # record images and steering,throttle
-    state=pickle.load(fstate)
+    state=sim.get_state()
     controls[h5idx]= [state["PIDsteering"],state["PIDthrottle"]]
     h5idx += 1
     if(h5idx>=maxidx):
@@ -78,5 +66,4 @@ while True:
         print("** Begin Steering deviation {}".format(deviation_angle))
 
 
-    pickle.dump({"steering":steering,'throttle':throttle},fcmd)
-    fcmd.flush()
+    sim.send_cmd({"steering":steering,'throttle':throttle})

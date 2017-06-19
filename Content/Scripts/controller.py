@@ -2,19 +2,18 @@ import h5py
 import pickle
 import numpy as np
 import sys
+import simulator
 
 # This controller just follows the PID recommendations
+def hook(config):
+    print(config)
+    return config
 
-print("Connecting to server")
-fstate=open("../../roboserver.state","rb")
-fcmd=open("../../roboserver.cmd","wb")
-print("Connection opened")
-config = pickle.load(fstate)
-pickle.dump(config,fcmd)
-fcmd.flush()
+sim=simulator.Simulator()
+sim.connect(hook)
+
 
 while True:
-    state=pickle.load(fstate)
+    state=sim.get_state()
     print("pathdistance {:7f} offset {:5f} distance {:7f} angle {:5.3f} dt={:5.4f}".format(state["pathdistance"], state["offset"], state["PIDthrottle"], state["PIDsteering"],state["delta_time"]))
-    pickle.dump({"steering":state["PIDsteering"],'throttle':state["PIDthrottle"]},fcmd)
-    fcmd.flush()
+    sim.send_cmd({"steering":state["PIDsteering"],'throttle':state["PIDthrottle"]})

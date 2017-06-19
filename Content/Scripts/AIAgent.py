@@ -10,6 +10,8 @@ import sys
 import random
 from fcntl import fcntl, F_GETFL, F_SETFL
 from os import O_NONBLOCK, read
+import os
+import tempfile
 
 
 class SplinePath:
@@ -123,12 +125,27 @@ class Driver:
             ue.log("Closing controller connection")
             self.fstate.close()
             self.fcmd.close()
+
+        # open pipes, create if needed
+        # note this code is duplicated in simulator.py.
+        tmpdir=tempfile.gettempdir()
+        state_filename=os.path.join(tmpdir,"sim_state")
+        cmd_filename=os.path.join(tmpdir,"sim_cmd")
+        if not os.path.exists(state_filename):
+            os.mkfifo(state_filename)
+        if not os.path.exists(cmd_filename):
+            os.mkfifo(cmd_filename)
+
         ue.log("WAITING FOR controller to connect")
-        self.fstate = open("roboserver.state", "wb")
-        self.fcmd = open("roboserver.cmd", "rb")
+        self.fstate = open(state_filename, "wb")
+        self.fcmd = open(cmd_filename, "rb")
         print("Fifos opened sending config")
+
+        #send initial config
         pickle.dump({"camerawidth":self.width,"cameraheight":self.height}, self.fstate)
         self.fstate.flush()
+
+        #check to see if client wants to change config
         self.requested_config = pickle.load(self.fcmd)
         print("Requested config",self.requested_config)
 

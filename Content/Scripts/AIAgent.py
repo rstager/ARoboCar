@@ -8,10 +8,18 @@ import subprocess
 import pickle
 import sys
 import random
+from fcntl import fcntl, F_GETFL, F_SETFL
+from os import O_NONBLOCK, read
 
-add_steering_noise=.1
-noise_probability=0.03  #how often to deviate - set to zero to drive correctly
+
+print (sys.path)
+
+add_steering_noise=.05
+noise_probability=0.01  #how often to deviate - set to zero to drive correctly
 deviation_duration=50 # duration of deviation
+BATCHSZ=100 # set to zero to disable recording
+#
+
 
 class SplinePath:
     def __init__(self,actor,label):
@@ -76,17 +84,20 @@ class Vcam:
         xform.rotation=FRotator(rot[0],rot[1],rot[2])
         ue.log("vcam xlate {} rot {}".format(xform.translation,xform.rotation))
         self.scene_capture=actor.get_actor_component_by_type(SceneCaptureComponent2D)
+
+        self.scene_capture.set_relative_location(offset[0],offset[1],offset[2])
+        self.scene_capture.set_relative_rotation(rot[0],rot[1],rot[2])
+        self.scene_capture.set_property("TextureTarget",self.rendertarget)
+
+
+        #ignore these..they are notes for work in progress
         #self.scene_capture= actor.actor_create_default_subobject(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
         #self.scene_capture = actor.ConstructObject(ue.find_class('SceneCaptureComponent2D'),
                                                                   #label + "_scenecapture")
         #self.scene_capture= actor.add_actor_component(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
-        self.scene_capture.set_relative_location(offset[0],offset[1],offset[2])
-        self.scene_capture.set_relative_rotation(rot[0],rot[1],rot[2])
         #print(self.scene_capture.get_actor())
         #ret=self.scene_capture.attach_to_actor(actor)
-        #print (ret)
         #mesh=actor.get_actor_component_by_type(SkeletalMeshComponent)
-        #print("mesh",mesh)
         #self.scene_capture.attach_to_component(mesh)#.get_actor_component_by_type(),"ATTACHMENT_RULE_SNAP_TO_TARGET")
 
         #UWhateverComponent * NewComponent = ConstructObject < UWhateverComponent > (UWhateverComponent::StaticClass(), this, TEXT("ComponentName"));
@@ -100,17 +111,13 @@ class Vcam:
 
 
         #self.scene_capture= actor.add_actor_component(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
-        #self.scene_capture= actor.AddComponent(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture",xform)
-        self.scene_capture.set_property("TextureTarget",self.rendertarget)
-        #print(dir(self.scene_capture.__class__))
-        #print("is actor",self.scene_capture.is_a(Actor))
-        #print("is actor",actor.is_a(Actor))
+        #self.scene_capture= actor.AddComponent(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture",xform))
         #self.scene_capture.SetupAttachment(actor.RootComponent)
         #self.scene_capture.SetRelativeTransform(xform)
         #self.scene_capture.set_relative_location(FVector(offset[0],offset[1],offset[2]))
-        for c in actor.get_actor_components():
-            if(c.is_a(ue.find_class('SceneCaptureComponent2D'))):
-                ue.log("{} {} {} {} {}".format(c.get_name(),c.get_relative_location(),c.get_property('AttachParent'),c.get_property('bAbsoluteLocation'),c.get_property('Mobility')))
+        #for c in actor.get_actor_components():
+        #    if(c.is_a(ue.find_class('SceneCaptureComponent2D'))):
+        #        ue.log("{} {} {} {} {}".format(c.get_name(),c.get_relative_location(),c.get_property('AttachParent'),c.get_property('bAbsoluteLocation'),c.get_property('Mobility')))
 
         # add reader last
         self.reader = actor.add_actor_component(ue.find_class('ATextureReader'),label+"_rendertarget")
@@ -123,6 +130,17 @@ class Driver:
     def __init__(self):
 
         pass
+    def open_connection(self):
+        if hasattr(self,"fstate"):
+            ue.log("Closing controller connection")
+            self.fstate.close()
+            self.fcmd.close()
+        ue.log("WAITING FOR controller to connect")
+        self.fstate = open("roboserver.state", "wb")
+        self.fcmd = open("roboserver.cmd", "rb")
+        print("Fifos opened")
+        pickle.dump(( self.width, self.height), self.fstate)
+
     def begin_play(self):
         self.pawn = self.uobject.get_owner()
         ue.log("Driver Begin Play {}".format(self.pawn.get_name()))
@@ -131,29 +149,13 @@ class Driver:
         self.width=160
 
         self.path=SplinePath(self.pawn,'Racetrack1')
-        self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],[0,0,100],[0,-10,0])
+        self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],[50,0,200],[0,-30,0])
 
-        self.pawn.EnableIncarView(True)
+        self.pawn.EnableIncarView(False)
 
         self.history=[]
-
-        self.deviating_cnt=0
-
-        #setup recording
-        self.batchsz=100
-        if self.batchsz != 0:
-            self.batch=0
-            self.images = np.zeros ([self.batchsz, self.height, self.width, 3])
-            self.controls =np.zeros ([self.batchsz, 2])
-            ue.log("images={},controls={}".format(self.images.shape,self.controls.shape))
-            self.outputidx=0
-            self.batchidx=0
-            self.maxidx=self.batchsz
-            ue.log("search path ".format(sys.path))
-            self.h5process=subprocess.Popen(["python", "Content/Scripts/2h5.py"], stdin=subprocess.PIPE,stderr=subprocess.STDOUT)
-            self.output = self.h5process.stdin
-            pickle.dump((self.batchsz, self.width, self.height), self.output)
-
+        self.open_connection()
+        self.firsttime=True
 
     def tick(self,delta_time):
         if not hasattr(self, 'vcam'):
@@ -165,54 +167,51 @@ class Driver:
         valid, pixels,framelag =self.vcam.capture()
         if(valid and framelag <=len(self.history)):
             location,rotation=self.history[-(framelag+1)] #values at time of snapshot
-
             img=np.array(pixels).reshape((self.vcam.height,self.vcam.width,4)).astype(np.uint8)[:,:,0:3]
             #
             # Control side
             #
             vmove=self.pawn.VehicleMovement
             vmove.BrakeInput= 0
-            if (self.path):
-                distance, angle = self.path.direction_ahead(self.pawn, 400)
-                reward,offset=self.path.closest(location)
-                if self.deviating_cnt > 0 and abs(offset)>100: #stop deviating if we ran off the road
-                    self.deviating_cnt=0
-                    ue.log("Abort deviation")
-                if self.deviating_cnt == 0:
-                    vmove.SteeringInput= -angle
-                    vmove.ThrottleInput=0.7
-                else:
-                    # we record the correct direction, but we steer with added noise for a while
-                    vmove.SteeringInput= -self.deviation_angle
-                    vmove.ThrottleInput=0.7
-                    self.deviating_cnt -= 1
-                    if(self.deviating_cnt==0):
-                        ue.log("End deviation")
-                if add_steering_noise >0 and self.deviating_cnt == 0 and random.random()<noise_probability:
-                    self.deviating_cnt = deviation_duration
-                    self.deviation_angle = angle + random.random()*add_steering_noise-(add_steering_noise/2)
-                    ue.log("****************  Begin Steering deviation {}".format(self.deviation_angle))
-            else:
-                vmove.SteeringInput=0.0
-                #vmove.ThrottleInput=0.7
-            if False:
-                properties_list = self.pawn.properties()
-                name = self.pawn.get_name()
-                ue.log("{} at [{:8.1f} {:8.1f} {:8.1f}] [{:4}x{:4}] {:5} {:1} vmove {:5.4f} {:3.2f} reward={:10.1f} offset={:5.4f}".format(name,location[0],location[1],location[2],
-                                                               self.vcam.width,self.vcam.height,len(pixels),framelag,vmove.SteeringInput, vmove.ThrottleInput, reward, offset))
-            #record
-            if self.batchsz != 0 :
+            distance, angle = self.path.direction_ahead(self.pawn, 400)
+            reward,offset=self.path.closest(location)
 
-                self.images[self.batchidx]=img
-                self.controls[self.batchidx]=[vmove.SteeringInput,vmove.ThrottleInput]
-                self.batchidx+=1
-                self.outputidx+=1
-                if (self.batchidx >= self.batchsz):
-                    ue.log("Output to 2h5.py {} {}".format(self.maxidx,np.sum(self.images)))
-                    pickle.dump(self.images, self.output )
-                    pickle.dump(self.controls, self.output )
-                    self.maxidx += self.batchsz
-                    self.batchidx=0
-                    self.images = np.zeros((self.batchsz, self.height, self.width, 3), np.uint8)
-                    self.controls = np.zeros((self.batchsz, 2))
-                    self.output.flush()
+
+            try:
+                # we send the data first, but we let the controller process in parrallel, so the command is actually
+                # one tick late.  We view this as a get command...send data,  but the controller
+                # views it as get data...send command.  So we skip the first get command to keep things in sync.
+                if self.firsttime:
+                    self.firsttime=False
+                else:
+                    # read previous command
+                    cmd=pickle.load(self.fcmd)
+                    vmove.SteeringInput=cmd["steering"]
+                    vmove.ThrottleInput = cmd["throttle"]
+                    #ue.log("got command {} {}".format(vmove.SteeringInput,vmove.ThrottleInput))
+
+                #send the state and give the controller some time to process
+                pickle.dump(img, self.fstate)
+                pickle.dump({"reward":reward,"offset":offset,"PIDthrottle":0.7,"PIDsteering":-angle,"delta_time":delta_time}, self.fstate)
+                self.fstate.flush()
+
+            except (OSError,ValueError,EOFError):
+                print("Lost connection to controller")
+                self.fstate.close()
+                self.fcmd.close()
+                self.uobject.quit_game()
+
+
+            if False:  # conditional debug info
+                name = self.pawn.get_name()
+                ue.log("{} at [{:8.1f} {:8.1f} {:8.1f}] [{:4}x{:4}] {:5} {:1} vmove {:5.4f} {:3.2f} reward={:10.1f} offset={:5.4f}".format(
+                        name, location[0], location[1], location[2],
+                        self.vcam.width, self.vcam.height, len(pixels), framelag, vmove.SteeringInput,
+                        vmove.ThrottleInput, reward, offset))
+    def on_preexit(self):
+        ue.log("on preexit")
+        try:
+            self.fstate.close()
+            self.fcmd.close()
+        except:
+            ue.log("Error closing pipes")

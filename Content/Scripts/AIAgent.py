@@ -16,21 +16,24 @@ import tempfile
 
 class SplinePath:
     def __init__(self,actor,label):
-        landscape=actor.get_world().find_actor_by_label(label)
-        self.component=actor.get_actor_component_by_type(SplineComponent)
-        if (self.component==None):
-            self.component = actor.add_actor_component(SplineComponent, 'Spline to follow')
-        self.component.SetClosedLoop(True)
-        self.component.ClearSplinePoints()
-        for segment in  landscape.SplineComponent.Segments:
-            first = True
-            for p in segment.Points:
-                if not first:
-                    self.component.AddSplineWorldPoint(p.Center)
-                else:
-                    first = False
-        self.max_distance = self.component.get_spline_length()
-        self.distance = 0.0
+        for landscape in actor.all_actors():
+            if(landscape.get_name() == label):
+                self.component=actor.get_actor_component_by_type(SplineComponent)
+                if (self.component==None):
+                    self.component = actor.add_actor_component(SplineComponent, 'Spline to follow')
+                self.component.SetClosedLoop(True)
+                self.component.ClearSplinePoints()
+                for segment in  landscape.SplineComponent.Segments:
+                    first = True
+                    for p in segment.Points:
+                        if not first:
+                            self.component.AddSplineWorldPoint(p.Center)
+                        else:
+                            first = False
+                self.max_distance = self.component.get_spline_length()
+                self.distance = 0.0
+                return
+        print("Didn't find landscape ",label)
 
     def loc_at(self,distance):
         return self.component.get_world_location_at_distance_along_spline(distance % self.max_distance)

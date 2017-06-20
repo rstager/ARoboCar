@@ -21,6 +21,7 @@ class Simulator:
             config=confighook(config)
         pickle.dump(config,self.fcmd)
         self.fcmd.flush()
+        return config
 
     def get_state(self):
         try:

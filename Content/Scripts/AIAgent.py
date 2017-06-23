@@ -202,7 +202,7 @@ class Driver:
                     #ue.log("got command {} {}".format(vmove.SteeringInput,vmove.ThrottleInput))
 
                 #send the state and give the controller some time to process
-                pickle.dump({"pathdistance":pathdistance,"offset":offset,"PIDthrottle":0.7,"PIDsteering":-angle,"delta_time":delta_time,"frontcamera":img}, self.fstate)
+                pickle.dump({"pathdistance":pathdistance,"pathoffset":offset,"PIDthrottle":0.7,"PIDsteering":-angle,"delta_time":delta_time,"frontcamera":img}, self.fstate)
                 self.fstate.flush()
 
             except (OSError,ValueError,EOFError,BrokenPipeError):

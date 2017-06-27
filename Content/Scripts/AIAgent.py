@@ -3,7 +3,8 @@ import numpy as np
 import math
 from unreal_engine import FVector,FTransform,FRotator
 from unreal_engine.classes import TextureRenderTarget2D,SceneComponent,SceneCaptureComponent2D
-from unreal_engine.classes import Actor,SplineComponent,SkeletalMeshComponent
+from unreal_engine.classes import Actor,SplineComponent,SkeletalMeshComponent,CameraComponent
+from unreal_engine.structs import HitResult
 import subprocess
 import pickle
 import sys
@@ -12,6 +13,7 @@ from fcntl import fcntl, F_GETFL, F_SETFL
 from os import O_NONBLOCK, read
 import os
 import tempfile
+
 
 
 class SplinePath:
@@ -86,26 +88,21 @@ class Vcam:
         self.scene_capture.set_property("TextureTarget",self.rendertarget)
 
 
-        #ignore these..they are notes for work in progress
+        # ignore these..they are notes for work in progress
         #self.scene_capture= actor.actor_create_default_subobject(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
-        #self.scene_capture = actor.ConstructObject(ue.find_class('SceneCaptureComponent2D'),
-                                                                  #label + "_scenecapture")
+        #self.scene_capture = actor.ConstructObject(ue.find_class('SceneCaptureComponent2D'),label + "_scenecapture")
         #self.scene_capture= actor.add_actor_component(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
         #print(self.scene_capture.get_actor())
         #ret=self.scene_capture.attach_to_actor(actor)
         #mesh=actor.get_actor_component_by_type(SkeletalMeshComponent)
         #self.scene_capture.attach_to_component(mesh)#.get_actor_component_by_type(),"ATTACHMENT_RULE_SNAP_TO_TARGET")
-
         #UWhateverComponent * NewComponent = ConstructObject < UWhateverComponent > (UWhateverComponent::StaticClass(), this, TEXT("ComponentName"));
-
         #NewComponent->RegisterComponent();
         #NewComponent->OnComponentCreated(); //Might not need this.
         #NewComponent->AttachTo(GetRootComponent(), SocketName / * NAME_None * /);
         #SpringArm = CreateDefaultSubobject < USpringArmComponent > (TEXT("SpringArm"));
         #SpringArm->SetRelativeLocation(FVector(0.0
         #SpringArm->SetupAttachment(RootComponent);
-
-
         #self.scene_capture= actor.add_actor_component(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
         #self.scene_capture= actor.AddComponent(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture",xform))
         #self.scene_capture.SetupAttachment(actor.RootComponent)
@@ -120,29 +117,27 @@ class Vcam:
         self.reader.set_property('RenderTarget',self.rendertarget)
         self.reader.SetWidthHeight(sz[0],sz[1])
     def capture(self):
+        self.scene_capture.CaptureScene()
         return self.reader.GetBuffer() # valid, pixels,framelag
 
 class Driver:
-    def open_connection(self):
-        if hasattr(self,"fstate"):
-            ue.log("Closing controller connection")
-            self.fstate.close()
-            self.fcmd.close()
 
-        # open pipes, create if needed
-        # note this code is duplicated in simulator.py.
+    def open_connection(self):
+
+        # open pipes if they exist. To reduce blocking, the client creates
+        # the pipes
+        # note: this code is duplicated in simulator.py.
         tmpdir=tempfile.gettempdir()
-        state_filename=os.path.join(tmpdir,"sim_state")
-        cmd_filename=os.path.join(tmpdir,"sim_cmd")
-        if not os.path.exists(state_filename):
-            os.mkfifo(state_filename)
-        if not os.path.exists(cmd_filename):
-            os.mkfifo(cmd_filename)
+        self.state_filename=os.path.join(tmpdir,"sim_state")
+        self.cmd_filename=os.path.join(tmpdir,"sim_cmd")
+
+        if not os.path.exists(self.state_filename) or not os.path.exists(self.cmd_filename):
+            return False
 
         ue.log("WAITING FOR controller to connect")
-        self.fstate = open(state_filename, "wb")
-        self.fcmd = open(cmd_filename, "rb")
-        print("Fifos opened sending config")
+        self.fstate = open(self.state_filename, "wb")
+        self.fcmd = open(self.cmd_filename, "rb")
+        print("send config")
 
         #send initial config
         pickle.dump({"camerawidth":self.width,"cameraheight":self.height}, self.fstate)
@@ -152,72 +147,139 @@ class Driver:
         self.requested_config = pickle.load(self.fcmd)
         print("Requested config",self.requested_config)
 
+        self.firsttime=True
+        self.connected=True
 
+        hits=HitResult()
+        self.pawn.VehicleMovement.StopMovementImmediately()
+        b=self.pawn.SetActorLocation(self.original_location,True,hits)
+        print("set loc {}".format(b))
+        #self.pawn.SetActorRotation(self.original_rotation,True)
+        #self.mesh.SetAllPhysicsPosition(self.original_location)
+        #self.mesh.SetAllPhysicsRotation(self.original_rotation)
+        #self.pawn.Teleport(self.original_location,self.original_rotationq)
+
+    def close_connection(self):
+        self.fstate.close()
+        self.fcmd.close()
+        os.unlink(self.state_filename)
+        os.unlink(self.cmd_filename)
+        self.connected=False
+    def command(self,cmd):
+
+        if(cmd["command"]=="reset"):
+            hits = HitResult()
+            self.pawn.VehicleMovement.StopMovementImmediately()
+            b,hits = self.pawn.SetActorLocationAndRotation(self.original_location,self.original_rotation, False, hits,True)
+            print("reset loc {}  {} {} {}".format(b,hits,self.original_location,self.pawn.get_actor_location()))
+
+        else:
+            ue.log("Unknown command {}".format(cmd))
     def begin_play(self):
+
         self.pawn = self.uobject.get_owner()
+        self.mesh=self.pawn.get_actor_component_by_type(SkeletalMeshComponent)
         ue.log("Driver Begin Play {}".format(self.pawn.get_name()))
 
-        self.height=90
+        self.height=128
         self.width=160
+
+        #self.camera=self.pawn.get_actor_component_by_type(CameraComponent)
+        #for c in self.pawn.actor_components():
+        #    if(c.get_name() == "InternalCamera"):
+        #        self.camera=c
+        #        break
+        #print("camera name={}".format(self.camera.get_name()))
+        #sz=FVector(90,160)
+        #self.pawn.get_world().GetGameViewPort().SetDesiredSizeinViewport(sz)
+
+        #self.width, self.height = ue.get_viewport_size()
+        #print ("Camera = {} x {}".format(self.width,self.height))
 
         self.path=SplinePath(self.pawn,'Racetrack1')
         self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],[50,0,200],[0,-30,0])
 
-        self.pawn.EnableIncarView(False)
-
+        self.pawn.EnableIncarView(True)
         self.history=[]
-        self.open_connection()
-        self.firsttime=True
+        self.original_location=self.pawn.get_actor_location()
+        self.original_rotation=self.pawn.get_actor_rotation()
+
+        self.connected=False
+        self.counter=0
+        self.steering=0
+        self.throttle=0
 
     def tick(self,delta_time):
-        if not hasattr(self, 'vcam'):
-            return
-        if(len(self.history)>4): self.history.pop(0)
-        location = self.pawn.get_actor_location() #current values
-        rotation = self.pawn.get_actor_rotation()
-        self.history.append((location,rotation))
-        valid, pixels,framelag =self.vcam.capture()
-        if(valid and framelag <=len(self.history)):
-            location,rotation=self.history[-(framelag+1)] #values at time of snapshot
-            img=np.array(pixels).reshape((self.vcam.height,self.vcam.width,4)).astype(np.uint8)[:,:,0:3]
+        if not self.connected:
+            if not self.open_connection():
+                return
+        #if not hasattr(self, 'vcam'):
+        #    return
+        valid=False
+        if self.counter==0:
+            self.location = self.pawn.get_actor_location() #current values
+            self.rotation = self.pawn.get_actor_rotation()
+            self.speed = self.pawn.VehicleMovement.GetForwardSpeed()
+        self.counter += 1
+        if self.counter==2:
+            valid, pixels, framelag = self.vcam.capture()
+            self.counter=0
+
+        #if not valid or framelag != 1:
+        #    print ("pixels {} {} {}".format(valid,len(pixels),framelag))
+        #pixels = ue.get_viewport_screenshot(False)
+
+        vmove=self.pawn.VehicleMovement
+        vmove.BrakeInput= 0
+        if valid:
+            img = np.array(pixels).reshape((self.height, self.width, 4)).astype(np.uint8)[:, :, 0:3]
+
             #
             # Control side
             #
-            vmove=self.pawn.VehicleMovement
-            vmove.BrakeInput= 0
-            dummy, angle = self.path.direction_ahead(self.pawn, 400)
-            pathdistance,offset=self.path.closest(location)
+
+
+            pathdistance,pathoffset=self.path.closest(self.location)
+            dummy, angle = self.path.direction_ahead(self.pawn, min(400,abs(pathoffset)*8))
 
             try:
-                # we send the data first, but we let the controller process in parrallel, so the command is actually
-                # one tick late.  We view this as a get command...send data,  but the controller
-                # views it as get data...send command.  So we skip the first get command to keep things in sync.
-                if self.firsttime:
-                    self.firsttime=False
-                else:
-                    # read previous command
-                    cmd=pickle.load(self.fcmd)
-                    vmove.SteeringInput=cmd["steering"]
-                    vmove.ThrottleInput = cmd["throttle"]
-                    #ue.log("got command {} {}".format(vmove.SteeringInput,vmove.ThrottleInput))
 
-                #send the state and give the controller some time to process
-                pickle.dump({"pathdistance":pathdistance,"offset":offset,"PIDthrottle":0.7,"PIDsteering":-angle,"delta_time":delta_time,"frontcamera":img}, self.fstate)
+                # send the state
+                pickle.dump({"pathdistance": pathdistance, "pathoffset": pathoffset, "PIDthrottle": 0.6,
+                             "PIDsteering": -angle, "delta_time": delta_time, "frontcamera": img, "speed": self.speed,
+                             "gear":vmove.},
+                            self.fstate)
                 self.fstate.flush()
+
+                # read command
+                cmd=pickle.load(self.fcmd)
+                #print("command = {}".format(cmd))
+                if("command" in cmd):
+                    self.command(cmd)
+                else:
+                    self.steering=cmd["steering"]
+                    self.throttle=cmd["throttle"]
+
+                #ue.log("got command {} {}".format(vmove.SteeringInput,vmove.ThrottleInput))
+
+
 
             except (OSError,ValueError,EOFError,BrokenPipeError):
                 print("Lost connection to controller")
-                self.fstate.close()
-                self.fcmd.close()
-                self.uobject.quit_game()
-
-
+                self.close_connection()
+            reward=0
+            framelag=0
             if False:  # conditional debug info
                 name = self.pawn.get_name()
                 ue.log("{} at [{:8.1f} {:8.1f} {:8.1f}] [{:4}x{:4}] {:5} {:1} vmove {:5.4f} {:3.2f} reward={:10.1f} offset={:5.4f}".format(
-                        name, location[0], location[1], location[2],
+                        name, self.location[0], self.location[1], self.location[2],
                         self.vcam.width, self.vcam.height, len(pixels), framelag, vmove.SteeringInput,
-                        vmove.ThrottleInput, reward, offset))
+                        vmove.ThrottleInput, reward, pathoffset))
+
+
+        vmove.SteeringInput = self.steering  #use cached values
+        vmove.ThrottleInput = self.throttle
+
     def on_preexit(self):
         ue.log("on preexit")
         try:

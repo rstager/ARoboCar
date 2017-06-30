@@ -173,7 +173,7 @@ class Driver:
 
         self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],[50,0,200],[0,-30,0])
 
-        self.pawn.EnableIncarView(True)
+        self.pawn.EnableIncarView(False)
         self.history=[]
         self.original_location=self.pawn.get_actor_location()
         self.original_rotation=self.pawn.get_actor_rotation()

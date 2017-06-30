@@ -184,7 +184,16 @@ class Driver:
         self.throttle=0
 
         self.wait_for_frame=0
+        self.initiate_capture()
 
+    def initiate_capture(self):
+        self.location = self.pawn.get_actor_location()
+        self.rotation = self.pawn.get_actor_rotation()
+        self.speed = self.pawn.VehicleMovement.GetForwardSpeed()
+        tmp = self.wait_for_frame
+        self.wait_for_frame = self.vcam.StartReadPixels()
+        if (self.wait_for_frame != tmp + 1):
+            ue.log("StartReadPixel skipped frame {} vs {}".format(self.wait_for_frame, tmp))
 
     def tick(self,delta_time):
 
@@ -218,6 +227,9 @@ class Driver:
                             self.fstate)
                 self.fstate.flush()
 
+                # start capture next image
+                self.initiate_capture()
+
                 # read command
                 cmd=pickle.load(self.fcmd)
                 #print("command = {}".format(cmd))
@@ -243,18 +255,11 @@ class Driver:
                         self.vcam.width, self.vcam.height, len(pixels), vmove.SteeringInput,
                         vmove.ThrottleInput, reward, pathoffset))
 
-        delay=abs(pframe-self.wait_for_frame)
-        if pframe == self.wait_for_frame or delay>5:
-            if(pframe!=self.wait_for_frame):
-                ue.log("Dropped frame {} {}".format(pframe,self.wait_for_frame))
-            # capture next cycle
-            self.location = self.pawn.get_actor_location()
-            self.rotation = self.pawn.get_actor_rotation()
-            self.speed = self.pawn.VehicleMovement.GetForwardSpeed()
-            tmp=self.wait_for_frame
-            self.wait_for_frame = self.vcam.StartReadPixels()
-            if(self.wait_for_frame != tmp+1):
-                ue.log("StartReadPixel skipped frame {} vs {}".format(self.wait_for_frame,tmp))
+
+        if abs(pframe-self.wait_for_frame)>5:
+            ue.log("Never received frame {} {}".format(pframe,self.wait_for_frame))
+            self.initiate_capture()
+
 
         vmove.SteeringInput = self.steering  #use cached values
         vmove.ThrottleInput = self.throttle

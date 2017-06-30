@@ -5,6 +5,7 @@ from unreal_engine import FVector,FTransform,FRotator
 from unreal_engine.classes import TextureRenderTarget2D,SceneComponent,SceneCaptureComponent2D
 from unreal_engine.classes import Actor,SplineComponent,SkeletalMeshComponent,CameraComponent
 from unreal_engine.structs import HitResult
+from unreal_engine.classes import KismetSystemLibrary
 import subprocess
 import pickle
 import sys
@@ -13,7 +14,6 @@ from fcntl import fcntl, F_GETFL, F_SETFL
 from os import O_NONBLOCK, read
 import os
 import tempfile
-
 
 
 class SplinePath:
@@ -54,6 +54,11 @@ class SplinePath:
     def location_at(self,distance):
         return self.component.get_world_location_at_distance_along_spline(distance)
 
+    def direction_at(self,distance):
+        tmp=self.component.GetDirectionAtDistanceAlongSpline(distance)
+        return FRotator(0,0,math.atan2(tmp.y,tmp.x)*57.2957)
+
+
     def closest(self,location):
         rvector= self.component.FindLocationClosestToWorldLocation(location)
         key=self.component.FindInputKeyClosestToWorldLocation(location)
@@ -63,6 +68,8 @@ class SplinePath:
         #print("closest keys {} d={} {}, distance={}".format(key,d1,d2,distance))
         offset=(rvector-location).length()
         return distance,offset
+    def length(self):
+        return self.max_distance
 
 class Vcam:
     def __init__(self,actor,label,sz,offset,rot):
@@ -97,6 +104,7 @@ class Vcam:
     def StartReadPixels(self):
         return self.reader.StartReadPixels()
 
+
 class Driver:
 
     def open_connection(self):
@@ -117,19 +125,20 @@ class Driver:
         print("send config")
 
         #send initial config
-        pickle.dump({"camerawidth":self.width,"cameraheight":self.height}, self.fstate)
+        self.config={"camerawidth":self.width,"cameraheight":self.height,"trackname":"Racetrack1"}
+        pickle.dump(self.config, self.fstate)
         self.fstate.flush()
 
         #check to see if client wants to change config
-        self.requested_config = pickle.load(self.fcmd)
-        print("Requested config",self.requested_config)
+        requested_config = pickle.load(self.fcmd)
+        print("Requested config",requested_config)
+        #TODO:Verify requested config
+        self.config=requested_config
 
+        self.path=SplinePath(self.pawn,self.config["trackname"])
         self.connected=True
 
-        hits=HitResult()
-        self.pawn.VehicleMovement.StopMovementImmediately()
-        b=self.pawn.SetActorLocation(self.original_location,True,hits)
-        print("set loc {}".format(b))
+        self.reset_location(0)
 
     def close_connection(self):
         self.fstate.close()
@@ -138,12 +147,17 @@ class Driver:
         os.unlink(self.cmd_filename)
         self.connected=False
 
+    def reset_location(self,distance):
+        hits = HitResult()
+        self.pawn.VehicleMovement.StopMovementImmediately()
+        loc = self.path.location_at(distance)
+        rot = self.path.direction_at(distance)
+        b, hits = self.pawn.SetActorLocationAndRotation(loc, rot, False, hits, True)
+        print("reset loc {}  {} {} {}".format(b, hits, self.original_location, self.pawn.get_actor_location()))
+
     def command(self,cmd):
         if(cmd["command"]=="reset"):
-            hits = HitResult()
-            self.pawn.VehicleMovement.StopMovementImmediately()
-            b,hits = self.pawn.SetActorLocationAndRotation(self.original_location,self.original_rotation, False, hits,True)
-            print("reset loc {}  {} {} {}".format(b,hits,self.original_location,self.pawn.get_actor_location()))
+            self.reset_location(random.random()*self.path.length)
         else:
             ue.log("Unknown command {}".format(cmd))
 
@@ -156,7 +170,7 @@ class Driver:
         self.height=128
         self.width=160
 
-        self.path=SplinePath(self.pawn,'Racetrack1')
+
         self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],[50,0,200],[0,-30,0])
 
         self.pawn.EnableIncarView(True)
@@ -170,6 +184,7 @@ class Driver:
         self.throttle=0
 
         self.wait_for_frame=0
+
 
     def tick(self,delta_time):
 

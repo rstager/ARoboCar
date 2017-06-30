@@ -44,27 +44,27 @@ void UATextureReader::TickComponent(float DeltaTime, ELevelTick TickType, FActor
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     //print("Texture Reader tick %d",RenderTarget != NULL);
-    StartReadPixels();
+    //StartReadPixels();
 }
 
 
-bool UATextureReader::GetBuffer(TArray<FColor> &buf, int &frame)
+bool UATextureReader::GetBuffer(TArray<FColor> &buf, int &frame, int &curframe)
 {
     struct context *ctx= &buffers[lastindex];
     if (ctx->bBufferReady) {
         //print("GetBuffer %d %d",lastindex,this->Pixels[lastindex].Num());
         buf = ctx->Pixels; 
-        frame=GFrameCounter-ctx->frame;
+        frame=ctx->frame;
+        curframe=GFrameCounter;
         return true;
     } else {
         print("GetBuffer no data available");
         return false;
     }
 }
-
-void UATextureReader::StartReadPixels()
+int UATextureReader::StartReadPixels()
 {
-    if(RenderTarget==NULL)return;
+    if(RenderTarget==NULL) return 0;
 	//borrowed from RenderTarget::ReadPixels()
 	FTextureRenderTarget2DResource* RenderResource = (FTextureRenderTarget2DResource*)RenderTarget->Resource;
  
@@ -114,5 +114,6 @@ void UATextureReader::StartReadPixels()
             *Context.lastp = Context.index;
             *Context.bBufferReadyp = true;
 		});
+    return (int)GFrameCounter;
 }
 

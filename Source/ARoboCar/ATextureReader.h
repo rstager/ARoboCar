@@ -20,13 +20,13 @@ class AROBOCAR_API UATextureReader : public UActorComponent
     int height;
     
     UFUNCTION(BlueprintCallable, Category = "HeightMap|Texture Helper")
-    void StartReadPixels();
+    int StartReadPixels();
     
     UFUNCTION(BlueprintCallable, Category = "HeightMap|Texture Helper")
     void SetWidthHeight(int w,int h);
     
     UFUNCTION(BlueprintCallable, Category = "HeightMap|Texture Helper")
-    bool GetBuffer(TArray<FColor> &pixels, int &frame);
+    bool GetBuffer(TArray<FColor> &pixels, int &frame, int &curframe);
     
 private:
     struct context {

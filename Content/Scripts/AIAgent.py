@@ -68,7 +68,7 @@ class SplinePath:
         #print("closest keys {} d={} {}, distance={}".format(key,d1,d2,distance))
         offset=(rvector-location).length()
         return distance,offset
-    def length(self):
+    def track_length(self):
         return self.max_distance
 
 class Vcam:
@@ -157,7 +157,7 @@ class Driver:
 
     def command(self,cmd):
         if(cmd["command"]=="reset"):
-            self.reset_location(random.random()*self.path.length)
+            self.reset_location(random.random()*self.path.track_length())
         else:
             ue.log("Unknown command {}".format(cmd))
 

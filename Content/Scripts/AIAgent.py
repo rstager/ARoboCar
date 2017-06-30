@@ -82,43 +82,20 @@ class Vcam:
         xform.rotation=FRotator(rot[0],rot[1],rot[2])
         ue.log("vcam xlate {} rot {}".format(xform.translation,xform.rotation))
         self.scene_capture=actor.get_actor_component_by_type(SceneCaptureComponent2D)
-
         self.scene_capture.set_relative_location(offset[0],offset[1],offset[2])
         self.scene_capture.set_relative_rotation(rot[0],rot[1],rot[2])
         self.scene_capture.set_property("TextureTarget",self.rendertarget)
-
-
-        # ignore these..they are notes for work in progress
-        #self.scene_capture= actor.actor_create_default_subobject(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
-        #self.scene_capture = actor.ConstructObject(ue.find_class('SceneCaptureComponent2D'),label + "_scenecapture")
-        #self.scene_capture= actor.add_actor_component(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
-        #print(self.scene_capture.get_actor())
-        #ret=self.scene_capture.attach_to_actor(actor)
-        #mesh=actor.get_actor_component_by_type(SkeletalMeshComponent)
-        #self.scene_capture.attach_to_component(mesh)#.get_actor_component_by_type(),"ATTACHMENT_RULE_SNAP_TO_TARGET")
-        #UWhateverComponent * NewComponent = ConstructObject < UWhateverComponent > (UWhateverComponent::StaticClass(), this, TEXT("ComponentName"));
-        #NewComponent->RegisterComponent();
-        #NewComponent->OnComponentCreated(); //Might not need this.
-        #NewComponent->AttachTo(GetRootComponent(), SocketName / * NAME_None * /);
-        #SpringArm = CreateDefaultSubobject < USpringArmComponent > (TEXT("SpringArm"));
-        #SpringArm->SetRelativeLocation(FVector(0.0
-        #SpringArm->SetupAttachment(RootComponent);
-        #self.scene_capture= actor.add_actor_component(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture")
-        #self.scene_capture= actor.AddComponent(ue.find_class('SceneCaptureComponent2D'),label+"_scenecapture",xform))
-        #self.scene_capture.SetupAttachment(actor.RootComponent)
-        #self.scene_capture.SetRelativeTransform(xform)
-        #self.scene_capture.set_relative_location(FVector(offset[0],offset[1],offset[2]))
-        #for c in actor.get_actor_components():
-        #    if(c.is_a(ue.find_class('SceneCaptureComponent2D'))):
-        #        ue.log("{} {} {} {} {}".format(c.get_name(),c.get_relative_location(),c.get_property('AttachParent'),c.get_property('bAbsoluteLocation'),c.get_property('Mobility')))
 
         # add reader last
         self.reader = actor.add_actor_component(ue.find_class('ATextureReader'),label+"_rendertarget")
         self.reader.set_property('RenderTarget',self.rendertarget)
         self.reader.SetWidthHeight(sz[0],sz[1])
+
     def capture(self):
         self.scene_capture.CaptureScene()
         return self.reader.GetBuffer() # valid, pixels,framelag
+    def StartReadPixels(self):
+        return self.reader.StartReadPixels()
 
 class Driver:
 
@@ -147,17 +124,12 @@ class Driver:
         self.requested_config = pickle.load(self.fcmd)
         print("Requested config",self.requested_config)
 
-        self.firsttime=True
         self.connected=True
 
         hits=HitResult()
         self.pawn.VehicleMovement.StopMovementImmediately()
         b=self.pawn.SetActorLocation(self.original_location,True,hits)
         print("set loc {}".format(b))
-        #self.pawn.SetActorRotation(self.original_rotation,True)
-        #self.mesh.SetAllPhysicsPosition(self.original_location)
-        #self.mesh.SetAllPhysicsRotation(self.original_rotation)
-        #self.pawn.Teleport(self.original_location,self.original_rotationq)
 
     def close_connection(self):
         self.fstate.close()
@@ -165,16 +137,16 @@ class Driver:
         os.unlink(self.state_filename)
         os.unlink(self.cmd_filename)
         self.connected=False
-    def command(self,cmd):
 
+    def command(self,cmd):
         if(cmd["command"]=="reset"):
             hits = HitResult()
             self.pawn.VehicleMovement.StopMovementImmediately()
             b,hits = self.pawn.SetActorLocationAndRotation(self.original_location,self.original_rotation, False, hits,True)
             print("reset loc {}  {} {} {}".format(b,hits,self.original_location,self.pawn.get_actor_location()))
-
         else:
             ue.log("Unknown command {}".format(cmd))
+
     def begin_play(self):
 
         self.pawn = self.uobject.get_owner()
@@ -183,18 +155,6 @@ class Driver:
 
         self.height=128
         self.width=160
-
-        #self.camera=self.pawn.get_actor_component_by_type(CameraComponent)
-        #for c in self.pawn.actor_components():
-        #    if(c.get_name() == "InternalCamera"):
-        #        self.camera=c
-        #        break
-        #print("camera name={}".format(self.camera.get_name()))
-        #sz=FVector(90,160)
-        #self.pawn.get_world().GetGameViewPort().SetDesiredSizeinViewport(sz)
-
-        #self.width, self.height = ue.get_viewport_size()
-        #print ("Camera = {} x {}".format(self.width,self.height))
 
         self.path=SplinePath(self.pawn,'Racetrack1')
         self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],[50,0,200],[0,-30,0])
@@ -209,29 +169,22 @@ class Driver:
         self.steering=0
         self.throttle=0
 
+        self.wait_for_frame=0
+
     def tick(self,delta_time):
+
         if not self.connected:
             if not self.open_connection():
                 return
-        #if not hasattr(self, 'vcam'):
-        #    return
-        valid=False
-        if self.counter==0:
-            self.location = self.pawn.get_actor_location() #current values
-            self.rotation = self.pawn.get_actor_rotation()
-            self.speed = self.pawn.VehicleMovement.GetForwardSpeed()
-        self.counter += 1
-        if self.counter==2:
-            valid, pixels, framelag = self.vcam.capture()
-            self.counter=0
 
-        #if not valid or framelag != 1:
-        #    print ("pixels {} {} {}".format(valid,len(pixels),framelag))
-        #pixels = ue.get_viewport_screenshot(False)
+        valid, pixels, pframe,gframe = self.vcam.capture()
+        #print("valid {} frame={} {}".format(valid,pframe, gframe))
 
         vmove=self.pawn.VehicleMovement
         vmove.BrakeInput= 0
-        if valid:
+
+
+        if valid and pframe == self.wait_for_frame:
             img = np.array(pixels).reshape((self.height, self.width, 4)).astype(np.uint8)[:, :, 0:3]
 
             #
@@ -246,8 +199,7 @@ class Driver:
 
                 # send the state
                 pickle.dump({"pathdistance": pathdistance, "pathoffset": pathoffset, "PIDthrottle": 0.6,
-                             "PIDsteering": -angle, "delta_time": delta_time, "frontcamera": img, "speed": self.speed,
-                             "gear":vmove.},
+                             "PIDsteering": -angle, "delta_time": delta_time, "frontcamera": img, "speed": self.speed},
                             self.fstate)
                 self.fstate.flush()
 
@@ -268,17 +220,31 @@ class Driver:
                 print("Lost connection to controller")
                 self.close_connection()
             reward=0
-            framelag=0
+
             if False:  # conditional debug info
                 name = self.pawn.get_name()
-                ue.log("{} at [{:8.1f} {:8.1f} {:8.1f}] [{:4}x{:4}] {:5} {:1} vmove {:5.4f} {:3.2f} reward={:10.1f} offset={:5.4f}".format(
+                ue.log("{} at [{:8.1f} {:8.1f} {:8.1f}] [{:4}x{:4}] {:5} vmove {:5.4f} {:3.2f} reward={:10.1f} offset={:5.4f}".format(
                         name, self.location[0], self.location[1], self.location[2],
-                        self.vcam.width, self.vcam.height, len(pixels), framelag, vmove.SteeringInput,
+                        self.vcam.width, self.vcam.height, len(pixels), vmove.SteeringInput,
                         vmove.ThrottleInput, reward, pathoffset))
 
+        delay=abs(pframe-self.wait_for_frame)
+        if pframe == self.wait_for_frame or delay>5:
+            if(pframe!=self.wait_for_frame):
+                ue.log("Dropped frame {} {}".format(pframe,self.wait_for_frame))
+            # capture next cycle
+            self.location = self.pawn.get_actor_location()
+            self.rotation = self.pawn.get_actor_rotation()
+            self.speed = self.pawn.VehicleMovement.GetForwardSpeed()
+            tmp=self.wait_for_frame
+            self.wait_for_frame = self.vcam.StartReadPixels()
+            if(self.wait_for_frame != tmp+1):
+                ue.log("StartReadPixel skipped frame {} vs {}".format(self.wait_for_frame,tmp))
 
         vmove.SteeringInput = self.steering  #use cached values
         vmove.ThrottleInput = self.throttle
+
+
 
     def on_preexit(self):
         ue.log("on preexit")

@@ -84,3 +84,4 @@ __pycache__
 *.swp
 core
 .DS_Store
+*.idea

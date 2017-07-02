@@ -25,11 +25,12 @@ class SplinePath:
                     self.component = actor.add_actor_component(SplineComponent, 'Spline to follow')
                 self.component.SetClosedLoop(True)
                 self.component.ClearSplinePoints()
+                offset=landscape.SplineComponent.get_world_location() #todo:should deal with rotation too.
                 for segment in  landscape.SplineComponent.Segments:
                     first = True
                     for p in segment.Points:
                         if not first:
-                            self.component.AddSplineWorldPoint(p.Center)
+                            self.component.AddSplineWorldPoint(p.Center+offset)
                         else:
                             first = False
                 self.max_distance = self.component.get_spline_length()
@@ -125,7 +126,8 @@ class Driver:
         print("send config")
 
         #send initial config
-        self.config={"camerawidth":self.width,"cameraheight":self.height,"trackname":"Racetrack1"}
+        self.config={"camerawidth":128,"cameraheight":160,"trackname":"Racetrack1",
+            "cameraloc":[50, 0, 200], "camerarot":[0, -30, 0]}
         pickle.dump(self.config, self.fstate)
         self.fstate.flush()
 
@@ -135,10 +137,22 @@ class Driver:
         #TODO:Verify requested config
         self.config=requested_config
 
+        self.height=self.config["cameraheight"]
+        self.width=self.config["camerawidth"]
+        vcam_loc=self.config["cameraloc"]
+        vcam_rot=self.config["camerarot"]
+
+        self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],vcam_loc,vcam_rot)
+
+
         self.path=SplinePath(self.pawn,self.config["trackname"])
-        self.connected=True
+
 
         self.reset_location(0)
+        self.wait_for_frame=0
+        self.initiate_capture()
+
+        self.connected=True
 
     def close_connection(self):
         self.fstate.close()
@@ -153,7 +167,7 @@ class Driver:
         loc = self.path.location_at(distance)
         rot = self.path.direction_at(distance)
         b, hits = self.pawn.SetActorLocationAndRotation(loc, rot, False, hits, True)
-        print("reset loc {}  {} {} {}".format(b, hits, self.original_location, self.pawn.get_actor_location()))
+        print("reset loc {}  {} {} {}".format(b, hits, loc, self.pawn.get_actor_location()))
 
     def command(self,cmd):
         if(cmd["command"]=="reset"):
@@ -167,11 +181,6 @@ class Driver:
         self.mesh=self.pawn.get_actor_component_by_type(SkeletalMeshComponent)
         ue.log("Driver Begin Play {}".format(self.pawn.get_name()))
 
-        self.height=128
-        self.width=160
-
-
-        self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],[50,0,200],[0,-30,0])
 
         self.pawn.EnableIncarView(False)
         self.history=[]
@@ -183,8 +192,7 @@ class Driver:
         self.steering=0
         self.throttle=0
 
-        self.wait_for_frame=0
-        self.initiate_capture()
+
 
     def initiate_capture(self):
         self.location = self.pawn.get_actor_location()

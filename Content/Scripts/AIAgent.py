@@ -10,8 +10,6 @@ import subprocess
 import pickle
 import sys
 import random
-from fcntl import fcntl, F_GETFL, F_SETFL
-from os import O_NONBLOCK, read
 import os
 import tempfile
 

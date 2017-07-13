@@ -14,7 +14,8 @@ from fcntl import fcntl, F_GETFL, F_SETFL
 from os import O_NONBLOCK, read
 import os
 import tempfile
-
+import importlib
+import traceback
 
 class SplinePath:
     def __init__(self,actor,label):
@@ -59,7 +60,6 @@ class SplinePath:
         tmp=self.component.GetDirectionAtDistanceAlongSpline(distance)
         return FRotator(0,0,math.atan2(tmp.y,tmp.x)*57.2957)
 
-
     def closest(self,location):
         rvector= self.component.FindLocationClosestToWorldLocation(location)
         key=self.component.FindInputKeyClosestToWorldLocation(location)
@@ -69,6 +69,7 @@ class SplinePath:
         #print("closest keys {} d={} {}, distance={}".format(key,d1,d2,distance))
         offset=(rvector-location).length()
         return distance,offset
+
     def track_length(self):
         return self.max_distance
 
@@ -127,7 +128,7 @@ class Driver:
 
         #send initial config
         self.config={"camerawidth":128,"cameraheight":160,"trackname":"Racetrack1",
-            "cameraloc":[50, 0, 200], "camerarot":[0, -30, 0]}
+            "cameraloc":[50, 0, 200], "camerarot":[0, -30, 0],"controller":None}
         pickle.dump(self.config, self.fstate)
         self.fstate.flush()
 
@@ -147,6 +148,18 @@ class Driver:
 
         self.path=SplinePath(self.pawn,self.config["trackname"])
 
+        if self.config["controller"] != None:
+            try:
+                mname=self.config["controller"]
+                ue.log("Importing {}".format(mname))
+                spec = importlib.util.spec_from_file_location("Controller",mname)
+                self.controller = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(self.controller)
+                ue.log("Loaded controller {}".format(self.controller))
+            except:
+                ue.log("Failed to load controller")
+                return
+
 
         self.reset_location(0)
         self.wait_for_frame=0
@@ -154,12 +167,30 @@ class Driver:
 
         self.connected=True
 
+
     def close_connection(self):
         self.fstate.close()
         self.fcmd.close()
         os.unlink(self.state_filename)
         os.unlink(self.cmd_filename)
         self.connected=False
+
+    # default driver and reward function. These can be overriden by the 'controller' config
+    def default_drive(state, path, driver, pawn):
+        pathdistance, pathoffset = path.closest(driver.location)
+        _, angle = path.direction_ahead(pawn, min(400, abs(pathoffset) * 8 + abs(driver.speed * 0.002)))
+        throttle, angle = path.curve(pawn, 4 * min(400, abs(pathoffset) * 8), driver.speed)
+        return throttle, angle
+
+    def default_reward(state, path, driver, pawn):
+        pathdistance, pathoffset = path.closest(driver.location)
+        if (pathdistance < 100):
+            ret = driver.speed
+        else:
+            ret = -1000
+        state.update({"pathdistance": pathdistance, "pathoffset": pathoffset})
+        return ret
+
 
     def reset_location(self,distance):
         hits = HitResult()
@@ -191,6 +222,7 @@ class Driver:
         self.counter=0
         self.steering=0
         self.throttle=0
+        self.prev_speed=0
 
 
 
@@ -202,6 +234,7 @@ class Driver:
         self.wait_for_frame = self.vcam.StartReadPixels()
         if (self.wait_for_frame != tmp + 1):
             ue.log("StartReadPixel skipped frame {} vs {}".format(self.wait_for_frame, tmp))
+
 
     def tick(self,delta_time):
 
@@ -219,20 +252,32 @@ class Driver:
         if valid and pframe == self.wait_for_frame:
             img = np.array(pixels).reshape((self.height, self.width, 4)).astype(np.uint8)[:, :, 0:3]
 
+            delta_speed=(self.speed-self.prev_speed)/delta_time
+            self.prev_speed=self.speed
+
             #
             # Control side
             #
 
-
-            pathdistance,pathoffset=self.path.closest(self.location)
-            dummy, angle = self.path.direction_ahead(self.pawn, min(400,abs(pathoffset)*8))
+            state={ "delta_time": delta_time, "frontcamera": img, "speed": self.speed,"reward":self.speed,"delta_speed":delta_speed,'throttle':vmove.ThrottleInput}
+            try:
+                if (hasattr(self,"controller") and hasattr(self.controller,"drive")):
+                    throttle,angle=self.controller.drive(state,self.path,self,self.pawn)
+                    state.update({"PIDthrottle": throttle, "PIDsteering": -angle})
+                if (hasattr(self,"controller")  and hasattr(self.controller,"reward")):
+                    state.update({"reward": self.controller.reward(state,self.path,self,self.pawn)})
+                else:
+                    state.update({"reward": Driver.default_reward(state,self.path,self,self.pawn)})
+            except:
+                traceback.print_exc()
+                print("Embeded controller failure ",sys.exc_info()[0])
+                self.close_connection()
+                return
 
             try:
 
                 # send the state
-                pickle.dump({"pathdistance": pathdistance, "pathoffset": pathoffset, "PIDthrottle": 0.6,
-                             "PIDsteering": -angle, "delta_time": delta_time, "frontcamera": img, "speed": self.speed},
-                            self.fstate)
+                pickle.dump(state,self.fstate)
                 self.fstate.flush()
 
                 # start capture next image

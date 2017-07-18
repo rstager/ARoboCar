@@ -104,7 +104,6 @@ class Vcam:
     def StartReadPixels(self):
         return self.reader.StartReadPixels()
 
-
 class Driver:
 
     def open_connection(self):
@@ -126,13 +125,13 @@ class Driver:
 
         #send initial config
         self.config={"camerawidth":128,"cameraheight":160,"trackname":"Racetrack1",
-            "cameraloc":[50, 0, 200], "camerarot":[0, -30, 0],"controller":None}
+            "cameraloc":[50, 0, 200], "camerarot":[0, -30, 0],"controller":None,'laps':1,'maxspeed':2000}
         pickle.dump(self.config, self.fstate)
         self.fstate.flush()
 
         #check to see if client wants to change config
         requested_config = pickle.load(self.fcmd)
-        print("Requested config",requested_config)
+        print("Requested config ",requested_config)
         #TODO:Verify requested config
         self.config=requested_config
 
@@ -140,22 +139,26 @@ class Driver:
         self.width=self.config["camerawidth"]
         vcam_loc=self.config["cameraloc"]
         vcam_rot=self.config["camerarot"]
+        self.laps=self.config['laps']
+        self.maxspeed=self.config['maxspeed']
 
         self.vcam=Vcam(self.pawn,"frontcamera",[self.width,self.height],vcam_loc,vcam_rot)
 
 
         self.path=SplinePath(self.pawn,self.config["trackname"])
+        self.tracklen=self.path.track_length()
+        self.racelen=self.tracklen*self.laps
 
-        if self.config["controller"] != None:
+        if self.config["observer"] != None:
             try:
-                mname=self.config["controller"]
+                mname=self.config["observer"]
                 ue.log("Importing {}".format(mname))
-                spec = importlib.util.spec_from_file_location("Controller",mname)
-                self.controller = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(self.controller)
-                ue.log("Loaded controller {}".format(self.controller))
+                spec = importlib.util.spec_from_file_location("observer",mname)
+                self.observer = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(self.observer)
+                ue.log("Loaded observer {}".format(self.observer))
             except:
-                ue.log("Failed to load controller")
+                ue.log("Failed to load observer")
                 return
 
 
@@ -173,21 +176,6 @@ class Driver:
         os.unlink(self.cmd_filename)
         self.connected=False
 
-    # default driver and reward function. These can be overriden by the 'controller' config
-    def default_drive(state, path, driver, pawn):
-        pathdistance, pathoffset = path.closest(driver.location)
-        _, angle = path.direction_ahead(pawn, min(400, abs(pathoffset) * 8 + abs(driver.speed * 0.002)))
-        throttle, angle = path.curve(pawn, 4 * min(400, abs(pathoffset) * 8), driver.speed)
-        return throttle, angle
-
-    def default_reward(state, path, driver, pawn):
-        pathdistance, pathoffset = path.closest(driver.location)
-        if (pathdistance < 100):
-            ret = driver.speed
-        else:
-            ret = -1000
-        state.update({"pathdistance": pathdistance, "pathoffset": pathoffset})
-        return ret
 
 
     def reset_location(self,distance):
@@ -197,10 +185,12 @@ class Driver:
         rot = self.path.direction_at(distance)
         b, hits = self.pawn.SetActorLocationAndRotation(loc, rot, False, hits, True)
         print("reset loc {}  {} {} {}".format(b, hits, loc, self.pawn.get_actor_location()))
+        self.prev_pathdistance=distance
 
     def command(self,cmd):
         if(cmd["command"]=="reset"):
-            self.reset_location(random.random()*self.path.track_length())
+            self.reset_location(0)
+            #self.reset_location(random.random()*self.path.track_length())
         else:
             ue.log("Unknown command {}".format(cmd))
 
@@ -209,7 +199,6 @@ class Driver:
         self.pawn = self.uobject.get_owner()
         self.mesh=self.pawn.get_actor_component_by_type(SkeletalMeshComponent)
         ue.log("Driver Begin Play {}".format(self.pawn.get_name()))
-
 
         self.pawn.EnableIncarView(False)
         self.history=[]
@@ -221,7 +210,8 @@ class Driver:
         self.steering=0
         self.throttle=0
         self.prev_speed=0
-
+        self.lapcnt=0
+        self.prev_pathdistance=0
 
 
     def initiate_capture(self):
@@ -253,22 +243,31 @@ class Driver:
             delta_speed=(self.speed-self.prev_speed)/delta_time
             self.prev_speed=self.speed
 
+            pathdistance, pathoffset = self.path.closest(self.location)
+
+            if (pathoffset > 200): #todo: should be road width
+                done=True
+                reward = -1
+            else:
+                reward = ((pathdistance-self.prev_pathdistance)/delta_time)/self.maxspeed
+                done=False
+
+            self.odometer = self.tracklen*self.lapcnt + pathdistance
+            if(self.prev_pathdistance > self.tracklen/2 and pathdistance<self.tracklen/2):
+                self.lapcnt +=1
+            self.prev_pathdistance=pathdistance
+
             #
             # Control side
             #
 
-            state={ "delta_time": delta_time, "frontcamera": img, "speed": self.speed,"reward":self.speed,"delta_speed":delta_speed,'throttle':vmove.ThrottleInput}
+            state={ "delta_time": delta_time, "observation":[img,[self.speed,delta_speed,self.odometer]],'reward':reward,'done':done,'info':{}}
             try:
-                if (hasattr(self,"controller") and hasattr(self.controller,"drive")):
-                    throttle,angle=self.controller.drive(state,self.path,self,self.pawn)
-                    state.update({"PIDthrottle": throttle, "PIDsteering": -angle})
-                if (hasattr(self,"controller")  and hasattr(self.controller,"reward")):
-                    state.update({"reward": self.controller.reward(state,self.path,self,self.pawn)})
-                else:
-                    state.update({"reward": Driver.default_reward(state,self.path,self,self.pawn)})
+                if (hasattr(self,"observer") and hasattr(self.observer, "observe")):
+                    self.observer.observe(state, self.path, self, self.pawn) #observer can make any changes it likes to the state
             except:
                 traceback.print_exc()
-                print("Embeded controller failure ",sys.exc_info()[0])
+                print("Embeded observer failure ",sys.exc_info()[0])
                 self.close_connection()
                 return
 
@@ -295,7 +294,7 @@ class Driver:
 
 
             except (OSError,ValueError,EOFError,BrokenPipeError):
-                print("Lost connection to controller")
+                print("Lost connection to observer")
                 self.close_connection()
             reward=0
 

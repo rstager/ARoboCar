@@ -41,7 +41,7 @@ class SplinePath:
         return self.component.get_world_location_at_distance_along_spline(distance % self.max_distance)
 
     def vector_ahead(self,actor_location,distance_ahead):
-        closest_distance,nearest_offset=self.closest(actor_location)
+        closest_distance,nearest_offset,_=self.closest(actor_location)
         location_ahead=self.location_at(closest_distance+distance_ahead)
         return location_ahead - actor_location
 
@@ -66,7 +66,10 @@ class SplinePath:
         distance=(d2-d1)*(key%1.0)+d1
         #print("closest keys {} d={} {}, distance={}".format(key,d1,d2,distance))
         offset=(rvector-location).length()
-        return distance,offset
+        s1=self.component.GetScaleAtSplinePoint(int(key))
+        s2=self.component.GetScaleAtSplinePoint(int(key)+1)
+        scale=(s2.length()+s1.length())/2
+        return distance,offset,scale
 
     def track_length(self):
         return self.max_distance
@@ -186,6 +189,14 @@ class Driver:
         b, hits = self.pawn.SetActorLocationAndRotation(loc, rot, False, hits, True)
         print("reset loc {}  {} {} {}".format(b, hits, loc, self.pawn.get_actor_location()))
         self.prev_pathdistance=distance
+        self.lapenabled = False
+        self.counter=0
+        self.steering=0
+        self.throttle=0
+        self.prev_speed=0
+        self.lapcnt=0
+        self.prev_pathdistance=0
+        self.delta_time=0
 
     def command(self,cmd):
         if(cmd["command"]=="reset"):
@@ -206,12 +217,8 @@ class Driver:
         self.original_rotation=self.pawn.get_actor_rotation()
 
         self.connected=False
-        self.counter=0
-        self.steering=0
-        self.throttle=0
-        self.prev_speed=0
-        self.lapcnt=0
-        self.prev_pathdistance=0
+
+
 
 
     def initiate_capture(self):
@@ -235,17 +242,19 @@ class Driver:
 
         vmove=self.pawn.VehicleMovement
         vmove.BrakeInput= 0
-
+        self.delta_time += delta_time
 
         if valid and pframe == self.wait_for_frame:
+            delta_time=self.delta_time
+            self.delta_time=0
             img = np.array(pixels).reshape((self.height, self.width, 4)).astype(np.uint8)[:, :, 0:3]
 
             delta_speed=(self.speed-self.prev_speed)/delta_time
             self.prev_speed=self.speed
 
-            pathdistance, pathoffset = self.path.closest(self.location)
-
-            if (pathoffset > 200): #todo: should be road width
+            pathdistance, pathoffset, scale = self.path.closest(self.location)
+            print("d={} offset={} scale={}".format(pathdistance,pathoffset,scale))
+            if (pathoffset > 100*scale): #todo: should be road width
                 done=True
                 reward = -1
             else:
@@ -253,8 +262,12 @@ class Driver:
                 done=False
 
             self.odometer = self.tracklen*self.lapcnt + pathdistance
-            if(self.prev_pathdistance > self.tracklen/2 and pathdistance<self.tracklen/2):
+            if(self.prev_pathdistance > self.tracklen*0.25 and self.prev_pathdistance< self.tracklen*0.75): #must cross track midpoint
+                self.lapenabled=True
+            if(self.lapenabled and pathdistance<self.tracklen*0.1):
                 self.lapcnt +=1
+                print("Lap {}".format(self.lapcnt))
+                self.lapenabled=False
             self.prev_pathdistance=pathdistance
 
             #
@@ -264,7 +277,7 @@ class Driver:
             state={ "delta_time": delta_time, "observation":[img,[self.speed,delta_speed,self.odometer]],'reward':reward,'done':done,'info':{}}
             try:
                 if (hasattr(self,"observer") and hasattr(self.observer, "observe")):
-                    self.observer.observe(state, self.path, self, self.pawn) #observer can make any changes it likes to the state
+                    self.observer.observe(delta_time,state, self.path, self, self.pawn) #observer can make any changes it likes to the state
             except:
                 traceback.print_exc()
                 print("Embeded observer failure ",sys.exc_info()[0])
@@ -304,7 +317,8 @@ class Driver:
                         name, self.location[0], self.location[1], self.location[2],
                         self.vcam.width, self.vcam.height, len(pixels), vmove.SteeringInput,
                         vmove.ThrottleInput, reward, pathoffset))
-
+        else:
+            print("Skipping a tick {}".format(self.delta_time))
 
         if abs(pframe-self.wait_for_frame)>5:
             ue.log("Never received frame {} {}".format(pframe,self.wait_for_frame))

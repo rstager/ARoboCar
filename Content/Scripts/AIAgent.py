@@ -14,6 +14,7 @@ import os
 import tempfile
 import importlib
 import traceback
+import types
 
 class SplinePath:
     def __init__(self,actor,label):
@@ -154,11 +155,9 @@ class Driver:
 
         if self.config["observer"] != None:
             try:
-                mname=self.config["observer"]
-                ue.log("Importing {}".format(mname))
-                spec = importlib.util.spec_from_file_location("observer",mname)
-                self.observer = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(self.observer)
+                code=self.config["observercode"]
+                self.observer = types.ModuleType("Observer", doc=None)
+                exec(code, self.observer.__dict__)
                 ue.log("Loaded observer {}".format(self.observer))
             except:
                 ue.log("Failed to load observer")

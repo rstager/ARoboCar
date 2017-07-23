@@ -153,16 +153,25 @@ class Driver:
         self.tracklen=self.path.track_length()
         self.racelen=self.tracklen*self.laps
 
-        if self.config["observer"] != None:
+        if "observercode" in self.config:
             try:
+                ue.log("Loading observercode")
                 code=self.config["observercode"]
                 self.observer = types.ModuleType("Observer", doc=None)
                 exec(code, self.observer.__dict__)
-                ue.log("Loaded observer {}".format(self.observer))
             except:
-                ue.log("Failed to load observer")
+                ue.log("Failed to load observercode  {}".format(self.observer))
                 return
-
+        elif "observer" in self.config:
+            try:
+                mname = self.config["observer"]
+                ue.log("Importing {}".format(mname))
+                spec = importlib.util.spec_from_file_location("observer", mname)
+                self.observer = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(self.observer)
+            except:
+                ue.log("Failed to load observer {}".format(self.observer))
+                return
 
         self.reset_location(0)
         self.wait_for_frame=0
@@ -186,7 +195,7 @@ class Driver:
         loc = self.path.location_at(distance)
         rot = self.path.direction_at(distance)
         b, hits = self.pawn.SetActorLocationAndRotation(loc, rot, False, hits, True)
-        print("reset loc {}  {} {} {}".format(b, hits, loc, self.pawn.get_actor_location()))
+        ue.log("reset loc {}  {} {} {}".format(b, hits, loc, self.pawn.get_actor_location()))
         self.prev_pathdistance=distance
         self.lapenabled = False
         self.counter=0
@@ -237,7 +246,7 @@ class Driver:
                 return
 
         valid, pixels, pframe,gframe = self.vcam.capture()
-        #print("valid {} frame={} {}".format(valid,pframe, gframe))
+        #ue.log("valid {} frame={} {}".format(valid,pframe, gframe))
 
         vmove=self.pawn.VehicleMovement
         vmove.BrakeInput= 0
@@ -252,7 +261,7 @@ class Driver:
             self.prev_speed=self.speed
 
             pathdistance, pathoffset, scale = self.path.closest(self.location)
-            print("d={} offset={} scale={}".format(pathdistance,pathoffset,scale))
+            #ue.log("d={} offset={} scale={}".format(pathdistance,pathoffset,scale))
             if (pathoffset > 100*scale): #todo: should be road width
                 done=True
                 reward = -1
@@ -265,7 +274,7 @@ class Driver:
                 self.lapenabled=True
             if(self.lapenabled and pathdistance<self.tracklen*0.1):
                 self.lapcnt +=1
-                print("Lap {}".format(self.lapcnt))
+                ue.log("Lap {}".format(self.lapcnt))
                 self.lapenabled=False
             self.prev_pathdistance=pathdistance
 
@@ -279,7 +288,7 @@ class Driver:
                     self.observer.observe(delta_time,state, self.path, self, self.pawn) #observer can make any changes it likes to the state
             except:
                 traceback.print_exc()
-                print("Embeded observer failure ",sys.exc_info()[0])
+                ue.log("Embeded observer failure ",sys.exc_info()[0])
                 self.close_connection()
                 return
 
@@ -294,7 +303,7 @@ class Driver:
 
                 # read command
                 cmd=pickle.load(self.fcmd)
-                #print("command = {}".format(cmd))
+                #ue.log("command = {}".format(cmd))
                 if("command" in cmd):
                     self.command(cmd)
                 else:
@@ -306,7 +315,7 @@ class Driver:
 
 
             except (OSError,ValueError,EOFError,BrokenPipeError):
-                print("Lost connection to observer")
+                ue.log("Lost connection to observer")
                 self.close_connection()
             reward=0
 
@@ -317,7 +326,7 @@ class Driver:
                         self.vcam.width, self.vcam.height, len(pixels), vmove.SteeringInput,
                         vmove.ThrottleInput, reward, pathoffset))
         else:
-            print("Skipping a tick {}".format(self.delta_time))
+            ue.log("Skipping a tick {}".format(self.delta_time))
 
         if abs(pframe-self.wait_for_frame)>5:
             ue.log("Never received frame {} {}".format(pframe,self.wait_for_frame))
